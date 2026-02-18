@@ -16,7 +16,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # → Inserisci le chiavi API nel .env
 
-# 3. Ingestion (dopo aver ricevuto il dataset)
+# 3. Ingestion (dopo aver ricevuto il dataset, Qdrant gira in-memory)
 python src/ingest.py --data_dir data/raw/
 
 # 4. Test pipeline
