@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Env & secrets
+.env
+
+# Data (mai committare il dataset)
+data/raw/
+data/processed/
+
+# Vector store locale
+qdrant_data/
+chroma_db/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+*.log
+
+# IDE
+.vscode/
+.idea/

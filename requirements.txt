@@ -1,0 +1,20 @@
+# Core framework (obbligatorio)
+datapizza-ai[openai,anthropic,google]
+qdrant-client
+
+# Document parsing (già incluso in datapizza-ai via Docling, ma esplicito per sicurezza)
+docling
+
+# Hybrid search
+rank-bm25
+
+# Embedding locale su GPU (gratis, RTX A1000)
+sentence-transformers
+
+# Demo
+streamlit
+
+# Utils
+python-dotenv
+pandas
+tqdm
