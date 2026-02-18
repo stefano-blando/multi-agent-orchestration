@@ -26,6 +26,10 @@ chroma_db/
 .DS_Store
 *.log
 
+# Contesto interno (solo locale)
+CLAUDE.md
+STATUS.md
+
 # IDE
 .vscode/
 .idea/
