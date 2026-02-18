@@ -6,21 +6,33 @@ Architettura:
     ├── RetrieverAgent  (cerca nei documenti con hybrid search)
     ├── ValidatorAgent  (controlla vincoli: dieta, normative)
     └── SynthesizerAgent (genera risposta finale)
+
+Note API datapizza-ai:
+  - Agent richiede: name, client, system_prompt (tutti obbligatori)
+  - agent.run(task) → StepResult (.text, .tools_used, .usage)
+  - orchestrator.can_call(sub_agent) → registra sub_agent come tool
+  - agent.as_tool() → Tool (description presa dal system_prompt)
 """
 
 import os
 from dotenv import load_dotenv
 from datapizza.agents import Agent
-from datapizza.tools import tool
-from datapizza.clients.openai import OpenAIClient
+from datapizza.tools import tool, Tool
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Client LLM
-# ---------------------------------------------------------------------------
 
-client = OpenAIClient(api_key=os.getenv("OPENAI_API_KEY"))
+def build_client():
+    """Costruisce il client LLM in base alle variabili d'ambiente disponibili."""
+    if os.getenv("OPENAI_API_KEY"):
+        from datapizza.clients.openai import OpenAIClient
+        return OpenAIClient(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o-mini",
+        )
+    # Fallback: MockClient per test senza API
+    from datapizza.clients.mock_client import MockClient
+    return MockClient()
 
 
 # ---------------------------------------------------------------------------
@@ -28,108 +40,102 @@ client = OpenAIClient(api_key=os.getenv("OPENAI_API_KEY"))
 # ---------------------------------------------------------------------------
 
 @tool
-def semantic_search(query: str, top_k: int = 5) -> list[dict]:
+def semantic_search(query: str, top_k: int = 5) -> str:
     """
     Cerca semanticamente nei documenti indicizzati su Qdrant.
     Ritorna i chunk più rilevanti con source e testo.
     """
-    from qdrant_client import QdrantClient
-    from sentence_transformers import SentenceTransformer
-    from src.utils import get_device
-
-    qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    collection = os.getenv("QDRANT_COLLECTION", "hackapizza")
-
-    model = SentenceTransformer("nomic-ai/nomic-embed-text-v1", trust_remote_code=True)
-    model = model.to(get_device())
-    vector = model.encode(query, normalize_embeddings=True).tolist()
-
-    client_q = QdrantClient(url=qdrant_url)
-    results = client_q.search(
-        collection_name=collection,
-        query_vector=vector,
-        limit=top_k,
+    from src.retrieval import hybrid_search
+    results = hybrid_search(query, top_k=top_k)
+    if not results:
+        return "Nessun documento trovato per questa query."
+    return "\n\n".join(
+        f"[{r['source']}] (score: {r['score']:.3f})\n{r['text']}"
+        for r in results
     )
-    return [{"text": r.payload["text"], "source": r.payload["source"], "score": r.score} for r in results]
 
 
 @tool
-def bm25_search(query: str, top_k: int = 5) -> list[dict]:
+def check_constraint(item: str, constraint_type: str) -> str:
     """
-    Ricerca BM25 (keyword-based) sui chunk indicizzati.
-    Utile per nomi propri, codici, termini tecnici con typo.
-    """
-    # TODO: popolare questo corpus al momento dell'ingestion
-    # Per ora è un placeholder — da collegare al corpus reale
-    raise NotImplementedError("Collegare al corpus al momento dell'ingestion.")
-
-
-@tool
-def check_constraint(item: str, constraint_type: str) -> dict:
-    """
-    Verifica se un item rispetta un vincolo (es. dieta, normativa).
+    Verifica se un item rispetta un vincolo (dieta, normativa, etc.).
+    Restituisce 'compliant' o 'non_compliant' con spiegazione.
 
     Args:
-        item: nome del piatto o ingrediente
-        constraint_type: tipo di vincolo (es. "gluten_free", "vegan", "regulation_X")
-
-    Returns:
-        {"compliant": bool, "reason": str}
+        item: nome del piatto o ingrediente da verificare
+        constraint_type: tipo di vincolo (es. 'gluten_free', 'vegan', 'regulation_X')
     """
-    # Placeholder — da implementare con i dati reali del challenge
-    return {"compliant": True, "reason": "Da implementare con dati challenge"}
+    # TODO: implementare con i dati reali del challenge al kickoff
+    return f"Verifica '{item}' per vincolo '{constraint_type}': da implementare con dati challenge."
 
 
 # ---------------------------------------------------------------------------
 # Agenti specializzati
 # ---------------------------------------------------------------------------
 
-retriever_agent = Agent(
-    name="retriever",
-    client=client,
-    tools=[semantic_search, bm25_search],
-    system_prompt=(
-        "Sei un esperto di ricerca documentale. "
-        "Data una query, usa semantic_search e bm25_search per trovare "
-        "i documenti più rilevanti. Combina i risultati ed elimina duplicati. "
-        "Ritorna sempre le source dei documenti trovati."
-    ),
-)
+def build_retriever_agent(client) -> Agent:
+    return Agent(
+        name="retriever",
+        client=client,
+        tools=[semantic_search],
+        system_prompt=(
+            "Sei un esperto di ricerca documentale. "
+            "Data una query, usa semantic_search per trovare i documenti più rilevanti. "
+            "Riporta sempre il nome del documento sorgente (source) per ogni risultato. "
+            "Se i risultati non sono sufficienti, riformula la query e riprova."
+        ),
+    )
 
-validator_agent = Agent(
-    name="validator",
-    client=client,
-    tools=[check_constraint],
-    system_prompt=(
-        "Sei un esperto di vincoli e normative. "
-        "Data una lista di candidati, verifica che rispettino tutti i vincoli "
-        "specificati nella query. Scarta quelli non conformi e spiega perché."
-    ),
-)
 
-synthesizer_agent = Agent(
-    name="synthesizer",
-    client=client,
-    tools=[],
-    system_prompt=(
-        "Sei un sintetizzatore di risposte. "
-        "Ricevi documenti rilevanti già validati e devi produrre una risposta "
-        "precisa e strutturata alla query originale. "
-        "Sii conciso, preciso e cita sempre le fonti."
-    ),
-)
+def build_validator_agent(client) -> Agent:
+    return Agent(
+        name="validator",
+        client=client,
+        tools=[check_constraint],
+        system_prompt=(
+            "Sei un esperto di vincoli dietetici e normative di sicurezza alimentare. "
+            "Data una lista di candidati e i vincoli della query, "
+            "verifica ogni candidato con check_constraint, "
+            "scarta quelli non conformi e spiega il motivo. "
+            "Ritorna solo i candidati che rispettano tutti i vincoli."
+        ),
+    )
 
-orchestrator_agent = Agent(
-    name="orchestrator",
-    client=client,
-    tools=[],
-    system_prompt=(
-        "Sei l'orchestratore di un sistema multi-agente. "
-        "Il tuo compito è coordinare retriever, validator e synthesizer "
-        "per rispondere alla query dell'utente nel modo più preciso ed efficiente. "
-        "Prima recupera i documenti rilevanti, poi valida i vincoli, poi sintetizza."
-    ),
-)
+
+def build_synthesizer_agent(client) -> Agent:
+    return Agent(
+        name="synthesizer",
+        client=client,
+        tools=[],
+        system_prompt=(
+            "Sei un sintetizzatore di risposte precise. "
+            "Ricevi documenti rilevanti già validati e produci una risposta strutturata "
+            "alla query originale. Cita sempre le fonti (nome documento). "
+            "Sii conciso e diretto."
+        ),
+    )
+
+
+def build_orchestrator(client) -> Agent:
+    retriever = build_retriever_agent(client)
+    validator = build_validator_agent(client)
+    synthesizer = build_synthesizer_agent(client)
+
+    orchestrator = Agent(
+        name="orchestrator",
+        client=client,
+        tools=[],
+        system_prompt=(
+            "Sei l'orchestratore di un sistema multi-agente per rispondere a query "
+            "su documenti. Segui sempre questi passi:\n"
+            "1. Usa 'retriever' per trovare documenti rilevanti\n"
+            "2. Usa 'validator' per verificare che i risultati rispettino i vincoli della query\n"
+            "3. Usa 'synthesizer' per produrre la risposta finale\n"
+            "Sii efficiente: non ripetere passi inutili."
+        ),
+    )
+    orchestrator.can_call([retriever, validator, synthesizer])
+    return orchestrator
 
 
 # ---------------------------------------------------------------------------
@@ -139,30 +145,12 @@ orchestrator_agent = Agent(
 def run_pipeline(query: str) -> str:
     """
     Esegue la pipeline multi-agente completa su una query.
-
-    Returns:
-        Risposta finale come stringa.
+    Costruisce gli agenti fresh ad ogni chiamata (stateless by default).
     """
-    # Step 1: Retrieval
-    retrieval_result = retriever_agent.run(
-        f"Query: {query}\nRecupera i documenti più rilevanti."
-    )
-
-    # Step 2: Validation
-    validation_result = validator_agent.run(
-        f"Query originale: {query}\n"
-        f"Documenti trovati: {retrieval_result.text}\n"
-        f"Verifica i vincoli e filtra i risultati non conformi."
-    )
-
-    # Step 3: Synthesis
-    final_result = synthesizer_agent.run(
-        f"Query originale: {query}\n"
-        f"Documenti validati: {validation_result.text}\n"
-        f"Produci la risposta finale."
-    )
-
-    return final_result.text
+    client = build_client()
+    orchestrator = build_orchestrator(client)
+    result = orchestrator.run(query)
+    return result.text if result else "Nessuna risposta generata."
 
 
 if __name__ == "__main__":

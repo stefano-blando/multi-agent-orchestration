@@ -90,7 +90,15 @@ def ingest(data_dir: str):
     print(f"Trovati {len(files)} file in {data_dir}")
 
     embedder = get_embedder()
-    client = QdrantClient(url=QDRANT_URL)
+    # Usa Docker se disponibile, altrimenti in-memory come fallback
+    try:
+        import httpx
+        httpx.get(QDRANT_URL, timeout=2)
+        client = QdrantClient(url=QDRANT_URL)
+        print(f"Qdrant: connesso a {QDRANT_URL}")
+    except Exception:
+        print("Qdrant Docker non disponibile, uso in-memory (dati non persistiti).")
+        client = QdrantClient(":memory:")
 
     # Crea collection se non esiste
     collections = [c.name for c in client.get_collections().collections]
