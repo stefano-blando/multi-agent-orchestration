@@ -1,5 +1,8 @@
 # CLAUDE.md — Contesto progetto Hackapizza 2.0
 
+## Repo
+https://github.com/StefanoBlando/hackapizza-2026
+
 ## Cos'è questo progetto
 Soluzione per **Hackapizza 2.0 — Agent Edition** (DataPizza, fine febbraio 2026).
 Challenge: sistema multi-agente che risponde a query in linguaggio naturale su un dataset
@@ -14,7 +17,7 @@ Scoring: **Jaccard Similarity** tra risposta e ground truth.
 
 ## Stack
 - **Framework agenti**: `datapizza-ai` (obbligatorio per la challenge)
-- **Vector store**: Qdrant (Docker in prod, in-memory come fallback)
+- **Vector store**: Qdrant in-memory (no Docker richiesto per hackathon)
 - **Embedding**: `nomic-ai/nomic-embed-text-v1` via sentence-transformers (locale/GPU)
 - **Hybrid search**: BM25 (rank-bm25) + Semantic con Reciprocal Rank Fusion
 - **Document parsing**: Docling (PDF/DOCX), BeautifulSoup (HTML), pandas (CSV)

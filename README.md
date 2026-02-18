@@ -2,6 +2,8 @@
 
 Multi-agent RAG system per Hackapizza 2.0.
 
+**Repo**: https://github.com/StefanoBlando/hackapizza-2026
+
 ## Setup rapido
 
 ```bash
