@@ -1,158 +1,201 @@
 """
-Multi-agent system con datapizza-ai.
+Agentic AI system con datapizza-ai — Hackapizza 2.0.
 
-Architettura:
-  OrchestratorAgent
-    ├── RetrieverAgent  (cerca nei documenti con hybrid search)
-    ├── ValidatorAgent  (controlla vincoli: dieta, normative)
-    └── SynthesizerAgent (genera risposta finale)
+Architettura: singolo MainAgent con ReAct loop e planning.
+L'agente decide autonomamente quali tool usare, in che ordine,
+e quante iterazioni fare prima di rispondere.
 
-Note API datapizza-ai:
-  - Agent richiede: name, client, system_prompt (tutti obbligatori)
-  - agent.run(task) → StepResult (.text, .tools_used, .usage)
-  - orchestrator.can_call(sub_agent) → registra sub_agent come tool
-  - agent.as_tool() → Tool (description presa dal system_prompt)
+Caratteristiche agentiche:
+  - planning_interval=1: pianifica esplicitamente prima di agire
+  - terminate_on_text=False: DEVE chiamare submit_answer per rispondere
+  - submit_answer(end=True): forza output strutturato (lista) per scoring Jaccard
+  - max_steps=15: evita loop infiniti
+
+Tool disponibili:
+  - hybrid_search: BM25 + semantic search con RRF fusion
+  - get_document: recupera tutti i chunk di un documento specifico
+  - check_constraint: verifica un vincolo su un item
+  - submit_answer: risposta finale strutturata (end=True)
 """
 
+import json
 import os
 from dotenv import load_dotenv
 from datapizza.agents import Agent
-from datapizza.tools import tool, Tool
+from datapizza.tools import tool
 
 load_dotenv()
 
 
 def build_client():
-    """Costruisce il client LLM in base alle variabili d'ambiente disponibili."""
     if os.getenv("OPENAI_API_KEY"):
         from datapizza.clients.openai import OpenAIClient
         return OpenAIClient(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o-mini",
         )
-    # Fallback: MockClient per test senza API
     from datapizza.clients.mock_client import MockClient
     return MockClient()
 
 
 # ---------------------------------------------------------------------------
-# Tools
+# Tool definitions
 # ---------------------------------------------------------------------------
 
 @tool
-def semantic_search(query: str, top_k: int = 5) -> str:
+def hybrid_search(query: str, top_k: int = 5) -> str:
     """
-    Cerca semanticamente nei documenti indicizzati su Qdrant.
-    Ritorna i chunk più rilevanti con source e testo.
+    Cerca nei documenti indicizzati usando ricerca ibrida (BM25 + semantica).
+    Usa questo tool ogni volta che hai bisogno di trovare informazioni nei documenti.
+    Puoi chiamarlo più volte con query diverse per esplorare aspetti differenti.
+
+    Args:
+        query: la query di ricerca in linguaggio naturale
+        top_k: numero di risultati da ritornare (default 5, max 10)
+
+    Returns:
+        Lista di chunk rilevanti con fonte e score di rilevanza.
     """
-    from src.retrieval import hybrid_search
-    results = hybrid_search(query, top_k=top_k)
+    from src.retrieval import hybrid_search as _hybrid_search
+    results = _hybrid_search(query, top_k=min(top_k, 10))
     if not results:
-        return "Nessun documento trovato per questa query."
-    return "\n\n".join(
-        f"[{r['source']}] (score: {r['score']:.3f})\n{r['text']}"
+        return "Nessun documento trovato per questa query. Prova a riformularla."
+    return "\n\n---\n\n".join(
+        f"[Fonte: {r['source']} | Score: {r['score']:.3f}]\n{r['text']}"
         for r in results
     )
 
 
 @tool
-def check_constraint(item: str, constraint_type: str) -> str:
+def get_document(source: str) -> str:
     """
-    Verifica se un item rispetta un vincolo (dieta, normativa, etc.).
-    Restituisce 'compliant' o 'non_compliant' con spiegazione.
+    Recupera il contenuto completo di un documento specifico per nome file.
+    Usa questo tool quando hai trovato un documento rilevante tramite hybrid_search
+    e vuoi approfondire il suo contenuto completo.
+
+    Args:
+        source: nome del file documento (es. 'menu_galattico.pdf')
+
+    Returns:
+        Tutto il testo del documento.
+    """
+    from src.retrieval import corpus
+    if corpus.is_empty():
+        return "Corpus non ancora caricato. Esegui prima l'ingestion."
+    chunks = [
+        chunk for chunk, src in zip(corpus.chunks, corpus.sources)
+        if src == source
+    ]
+    if not chunks:
+        return f"Documento '{source}' non trovato nel corpus."
+    return f"[Documento: {source}]\n\n" + "\n\n".join(chunks)
+
+
+@tool
+def check_constraint(item: str, constraint: str) -> str:
+    """
+    Verifica se un item (piatto, ingrediente, prodotto) rispetta un vincolo specifico.
+    Usa questo tool per validare ogni candidato rispetto ai requisiti della query
+    prima di includerlo nella risposta finale.
 
     Args:
         item: nome del piatto o ingrediente da verificare
-        constraint_type: tipo di vincolo (es. 'gluten_free', 'vegan', 'regulation_X')
+        constraint: descrizione del vincolo (es. 'senza glutine', 'vegano', 'normativa X')
+
+    Returns:
+        'CONFORME' o 'NON CONFORME' con motivazione.
     """
-    # TODO: implementare con i dati reali del challenge al kickoff
-    return f"Verifica '{item}' per vincolo '{constraint_type}': da implementare con dati challenge."
+    # TODO al kickoff: implementare con i dati reali del challenge
+    # Per ora: ricerca nel corpus se ci sono info sul vincolo per questo item
+    from src.retrieval import hybrid_search as _hybrid_search
+    results = _hybrid_search(f"{item} {constraint}", top_k=3)
+    if not results:
+        return f"Nessuna informazione trovata su '{item}' e vincolo '{constraint}'."
+    context = "\n".join(r["text"] for r in results)
+    return f"Informazioni trovate per '{item}' / '{constraint}':\n{context}"
+
+
+@tool(end=True)
+def submit_answer(items: list) -> str:
+    """
+    Sottomette la risposta finale come lista di item.
+    CHIAMARE SOLO quando sei completamente sicuro della risposta.
+    NON chiamare prima di aver verificato tutti i vincoli della query.
+    La risposta verrà valutata con Jaccard Similarity — includi SOLO item certi.
+
+    Args:
+        items: lista di nomi (piatti, prodotti, etc.) che rispondono alla query
+
+    Returns:
+        JSON della risposta finale.
+    """
+    return json.dumps({"answer": items}, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
-# Agenti specializzati
+# Agent
 # ---------------------------------------------------------------------------
 
-def build_retriever_agent(client) -> Agent:
+SYSTEM_PROMPT = """Sei un agente AI specializzato nell'analisi di documenti per rispondere
+a query complesse. Operi in un loop ReAct: Ragiona → Agisci → Osserva → Ragiona.
+
+REGOLE FONDAMENTALI:
+1. Prima di agire, pianifica: "Cosa devo trovare per rispondere a questa query?"
+2. Usa hybrid_search più volte con angolazioni diverse se necessario
+3. Se trovi un documento rilevante, approfondiscilo con get_document
+4. Per ogni vincolo nella query (dieta, normative, restrizioni), verifica con check_constraint
+5. Includi nella risposta SOLO item di cui sei certo
+6. Termina SEMPRE chiamando submit_answer con la lista finale — mai rispondere in prosa
+
+STRATEGIA DI RICERCA:
+- Inizia con ricerche generali, poi raffina
+- Cerca anche le eccezioni e le esclusioni
+- Se la query menziona vincoli multipli, verifica ognuno separatamente
+- In caso di dubbio su un item, escludilo dalla risposta
+"""
+
+
+def build_agent() -> Agent:
+    client = build_client()
     return Agent(
-        name="retriever",
+        name="hackapizza_agent",
         client=client,
-        tools=[semantic_search],
-        system_prompt=(
-            "Sei un esperto di ricerca documentale. "
-            "Data una query, usa semantic_search per trovare i documenti più rilevanti. "
-            "Riporta sempre il nome del documento sorgente (source) per ogni risultato. "
-            "Se i risultati non sono sufficienti, riformula la query e riprova."
-        ),
+        tools=[hybrid_search, get_document, check_constraint, submit_answer],
+        system_prompt=SYSTEM_PROMPT,
+        planning_interval=1,      # pianifica prima di ogni ciclo
+        max_steps=15,             # evita loop infiniti
+        terminate_on_text=False,  # DEVE usare submit_answer
     )
-
-
-def build_validator_agent(client) -> Agent:
-    return Agent(
-        name="validator",
-        client=client,
-        tools=[check_constraint],
-        system_prompt=(
-            "Sei un esperto di vincoli dietetici e normative di sicurezza alimentare. "
-            "Data una lista di candidati e i vincoli della query, "
-            "verifica ogni candidato con check_constraint, "
-            "scarta quelli non conformi e spiega il motivo. "
-            "Ritorna solo i candidati che rispettano tutti i vincoli."
-        ),
-    )
-
-
-def build_synthesizer_agent(client) -> Agent:
-    return Agent(
-        name="synthesizer",
-        client=client,
-        tools=[],
-        system_prompt=(
-            "Sei un sintetizzatore di risposte precise. "
-            "Ricevi documenti rilevanti già validati e produci una risposta strutturata "
-            "alla query originale. Cita sempre le fonti (nome documento). "
-            "Sii conciso e diretto."
-        ),
-    )
-
-
-def build_orchestrator(client) -> Agent:
-    retriever = build_retriever_agent(client)
-    validator = build_validator_agent(client)
-    synthesizer = build_synthesizer_agent(client)
-
-    orchestrator = Agent(
-        name="orchestrator",
-        client=client,
-        tools=[],
-        system_prompt=(
-            "Sei l'orchestratore di un sistema multi-agente per rispondere a query "
-            "su documenti. Segui sempre questi passi:\n"
-            "1. Usa 'retriever' per trovare documenti rilevanti\n"
-            "2. Usa 'validator' per verificare che i risultati rispettino i vincoli della query\n"
-            "3. Usa 'synthesizer' per produrre la risposta finale\n"
-            "Sii efficiente: non ripetere passi inutili."
-        ),
-    )
-    orchestrator.can_call([retriever, validator, synthesizer])
-    return orchestrator
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-def run_pipeline(query: str) -> str:
+def run(query: str) -> list[str]:
     """
-    Esegue la pipeline multi-agente completa su una query.
-    Costruisce gli agenti fresh ad ogni chiamata (stateless by default).
+    Esegue il pipeline agentico su una query.
+
+    Returns:
+        Lista di item che rispondono alla query (per scoring Jaccard).
     """
-    client = build_client()
-    orchestrator = build_orchestrator(client)
-    result = orchestrator.run(query)
-    return result.text if result else "Nessuna risposta generata."
+    agent = build_agent()
+    result = agent.run(query)
+
+    if not result or not result.text:
+        return []
+
+    # Estrai la lista dal JSON di submit_answer
+    try:
+        data = json.loads(result.text)
+        return data.get("answer", [])
+    except json.JSONDecodeError:
+        # Fallback: ritorna il testo grezzo come lista singola
+        return [result.text]
 
 
 if __name__ == "__main__":
     query = input("Query: ")
-    print(run_pipeline(query))
+    answer = run(query)
+    print(f"\nRisposta: {answer}")
+    print(f"N. item: {len(answer)}")
