@@ -19,7 +19,8 @@ torch
 einops
 
 # Demo
-streamlit
+streamlit==1.54.0
+chainlit
 
 # Utils
 python-dotenv

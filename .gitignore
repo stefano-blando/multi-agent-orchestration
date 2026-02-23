@@ -33,3 +33,6 @@ STATUS.md
 # IDE
 .vscode/
 .idea/
+
+# Chainlit runtime
+.chainlit/

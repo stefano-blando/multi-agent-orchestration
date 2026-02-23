@@ -9,6 +9,7 @@ Uso:
 """
 
 import os
+import json
 import argparse
 from pathlib import Path
 from dotenv import load_dotenv
@@ -18,6 +19,8 @@ load_dotenv()
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "hackapizza")
 EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "local")
+BM25_CORPUS_PATH = os.getenv("BM25_CORPUS_PATH", "data/index/bm25_corpus.jsonl")
+EMBEDDING_MOCK_DIM = int(os.getenv("EMBEDDING_MOCK_DIM", "64"))
 
 
 def get_embedder():
@@ -33,8 +36,37 @@ def get_embedder():
         # Fallback API
         from datapizza.embedders.openai import OpenAIEmbedder
         return OpenAIEmbedder(api_key=os.getenv("OPENAI_API_KEY"))
+    elif EMBEDDING_MODE == "mock":
+        # Modalita' offline deterministica (no API/GPU).
+        return None
     else:
         raise ValueError(f"EMBEDDING_MODE non supportato: {EMBEDDING_MODE}")
+
+
+def embed_text(embedder, text: str) -> list[float]:
+    """Genera embedding indipendentemente dal provider scelto."""
+    if EMBEDDING_MODE == "local":
+        return embedder.encode(text, normalize_embeddings=True).tolist()
+    if EMBEDDING_MODE == "mock":
+        from src.utils import deterministic_embedding
+
+        return deterministic_embedding(text, dim=EMBEDDING_MOCK_DIM)
+    vector = embedder.embed(text)
+    if hasattr(vector, "tolist"):
+        return vector.tolist()
+    return list(vector)
+
+
+def infer_vector_size(embedder) -> int:
+    """Inferisce la dimensionalita' del vettore dal provider attivo."""
+    if EMBEDDING_MODE == "local":
+        return 768
+    if EMBEDDING_MODE == "mock":
+        return EMBEDDING_MOCK_DIM
+    probe = embed_text(embedder, "dimension probe")
+    if not probe:
+        raise RuntimeError("Impossibile inferire dimensione embedding.")
+    return len(probe)
 
 
 def parse_document(file_path: Path) -> str:
@@ -78,7 +110,24 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]
     return chunks
 
 
-def ingest(data_dir: str):
+def _get_collection_vector_size(client, collection_name: str) -> int | None:
+    """Ritorna la dimensionalita' vettore della collection, se leggibile."""
+    try:
+        info = client.get_collection(collection_name=collection_name)
+        vectors_cfg = info.config.params.vectors
+        if hasattr(vectors_cfg, "size"):
+            return int(vectors_cfg.size)
+        if isinstance(vectors_cfg, dict) and vectors_cfg:
+            first_key = next(iter(vectors_cfg))
+            first_vector = vectors_cfg[first_key]
+            if hasattr(first_vector, "size"):
+                return int(first_vector.size)
+    except Exception:
+        return None
+    return None
+
+
+def ingest(data_dir: str, recreate: bool = False, batch_size: int = 256):
     from qdrant_client import QdrantClient
     from qdrant_client.models import Distance, VectorParams, PointStruct
     import uuid
@@ -100,45 +149,81 @@ def ingest(data_dir: str):
         print("Qdrant Docker non disponibile, uso in-memory (dati non persistiti).")
         client = QdrantClient(":memory:")
 
+    vector_size = infer_vector_size(embedder)
+
     # Crea collection se non esiste
     collections = [c.name for c in client.get_collections().collections]
+    if recreate and QDRANT_COLLECTION in collections:
+        client.delete_collection(collection_name=QDRANT_COLLECTION)
+        collections.remove(QDRANT_COLLECTION)
+        print(f"Collection '{QDRANT_COLLECTION}' rimossa (--recreate).")
+
     if QDRANT_COLLECTION not in collections:
         client.create_collection(
             collection_name=QDRANT_COLLECTION,
-            vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
         )
-        print(f"Collection '{QDRANT_COLLECTION}' creata.")
+        print(f"Collection '{QDRANT_COLLECTION}' creata (dim={vector_size}).")
+    else:
+        existing_size = _get_collection_vector_size(client, QDRANT_COLLECTION)
+        if existing_size is not None and existing_size != vector_size:
+            raise ValueError(
+                f"Collection '{QDRANT_COLLECTION}' ha dim={existing_size}, "
+                f"ma l'embedder corrente usa dim={vector_size}. "
+                "Rilancia con --recreate per rigenerarla."
+            )
 
-    points = []
-    for file_path in files:
-        print(f"  Parsing: {file_path.name}")
-        try:
-            text = parse_document(file_path)
-            chunks = chunk_text(text)
+    points_batch = []
+    total_chunks = 0
+    corpus_path = Path(BM25_CORPUS_PATH)
+    corpus_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Corpus BM25 su file: {corpus_path}")
 
-            for i, chunk in enumerate(chunks):
-                if EMBEDDING_MODE == "local":
-                    vector = embedder.encode(chunk, normalize_embeddings=True).tolist()
-                else:
-                    vector = embedder.embed(chunk)
+    with corpus_path.open("w", encoding="utf-8") as corpus_file:
+        for file_path in files:
+            print(f"  Parsing: {file_path.name}")
+            try:
+                text = parse_document(file_path)
+                chunks = chunk_text(text)
 
-                points.append(
-                    PointStruct(
-                        id=str(uuid.uuid4()),
-                        vector=vector,
-                        payload={
-                            "text": chunk,
-                            "source": file_path.name,
-                            "chunk_index": i,
-                        },
+                for i, chunk in enumerate(chunks):
+                    vector = embed_text(embedder, chunk)
+                    points_batch.append(
+                        PointStruct(
+                            id=str(uuid.uuid4()),
+                            vector=vector,
+                            payload={
+                                "text": chunk,
+                                "source": file_path.name,
+                                "chunk_index": i,
+                            },
+                        )
                     )
-                )
-        except Exception as e:
-            print(f"  ERRORE su {file_path.name}: {e}")
+                    corpus_file.write(
+                        json.dumps(
+                            {
+                                "text": chunk,
+                                "source": file_path.name,
+                                "chunk_index": i,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                    total_chunks += 1
 
-    if points:
-        client.upsert(collection_name=QDRANT_COLLECTION, points=points)
-        print(f"\nIndicizzati {len(points)} chunk in Qdrant.")
+                    if len(points_batch) >= batch_size:
+                        client.upsert(collection_name=QDRANT_COLLECTION, points=points_batch)
+                        points_batch = []
+            except Exception as e:
+                print(f"  ERRORE su {file_path.name}: {e}")
+
+    if points_batch:
+        client.upsert(collection_name=QDRANT_COLLECTION, points=points_batch)
+
+    if total_chunks:
+        print(f"\nIndicizzati {total_chunks} chunk in Qdrant.")
+        print(f"Corpus BM25 persistito in: {corpus_path}")
     else:
         print("Nessun chunk indicizzato.")
 
@@ -146,5 +231,7 @@ def ingest(data_dir: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", default="data/raw/")
+    parser.add_argument("--recreate", action="store_true")
+    parser.add_argument("--batch_size", type=int, default=256)
     args = parser.parse_args()
-    ingest(args.data_dir)
+    ingest(args.data_dir, recreate=args.recreate, batch_size=max(1, args.batch_size))
