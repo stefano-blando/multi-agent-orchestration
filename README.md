@@ -114,3 +114,12 @@ Runtime tuning utili demo:
 - `APP_TIMEOUT_SECONDS`: timeout hard per chiamate runtime UI
 - `HYBRID_CACHE_TTL_SECONDS`: cache retrieval query ripetute
 - `BATCH_CACHE_TTL_SECONDS`: cache validator batch ripetuti
+
+## Codice Importato (Hackapizza + Ventre a Terra)
+
+Per mantenere la repo ordinata ma completa, il codice storico e' stato importato in:
+
+- `legacy/ventre-a-terra-baseline/`: runtime SSE/phase-engine completo (core competitivo).
+- `legacy/hackapizza-unique/`: file unici provenienti da `hackapizza` (`prompts.py`, strategia, status).
+
+Sono stati esclusi artefatti non utili al codice (venv, cache, log, file slide, dump runtime).
