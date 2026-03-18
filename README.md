@@ -1,25 +1,37 @@
-# Multi-Agent Orchestration (Hackapizza 2.0)
+# 🍕 Multi-Agent Orchestration
 
-Repository rifattorizzata sul codice runtime avanzato sviluppato in `ventre-a-terra`.
+Bot competitivo per **Hackapizza 2.0**, basato su orchestrazione multi-agente event-driven.
 
-Il focus e' il bot competitivo event-driven per Hackapizza 2.0:
-- loop SSE di gioco
-- orchestrazione per fase (`speaking`, `closed_bid`, `waiting`, `serving`)
-- tools MCP/HTTP + strategy engine + persistence locale
+## ✨ Cosa fa
 
-## Struttura
+- Gestisce il flusso di gioco via SSE (`game_started`, `phase_changed`, `client_spawned`, ...)
+- Esegue strategie diverse per ogni fase: `speaking`, `closed_bid`, `waiting`, `serving`
+- Usa tool MCP/HTTP per menu, bid, market, preparazione e servizio
+- Tiene stato runtime, metriche e persistenza locale per decisioni più robuste
 
-- `main.py`: entrypoint SSE, dispatch fasi, retry, KPI e failover
-- `agent.py`: factory agent e sub-agent market analyst
-- `api_get.py`, `api_mcp.py`: client API
-- `game_state.py`: stato runtime del ristorante
-- `phases/`: prompt + logica per ogni fase
-- `utils/`: bidding/menu/serving/market/state persistence
-- `tools.py`: tool datapizza-ai usati dagli agenti
-- `tests/test_logic.py`: test unit logica strategica
-- `smoke_test.py`, `test_agent.py`: test operativi
+## 🗂️ Struttura Progetto
 
-## Setup rapido
+```text
+app/
+  main.py                # entrypoint runtime
+  agent.py               # factory agent e sub-agent
+  api_get.py             # client REST
+  api_mcp.py             # client MCP
+  game_state.py          # stato runtime ristorante
+  tools.py               # tool chiamabili dagli agenti
+  phases/                # logica e prompt per fase
+  utils/                 # strategia, pricing, serving, persistence
+  replay_metrics.py      # analisi replay
+
+scripts/
+  smoke_test.py          # check rapido API/SSE/MCP
+  test_agent.py          # simulazione fasi senza loop SSE completo
+
+tests/
+  test_logic.py          # unit test logica strategica
+```
+
+## ⚙️ Setup
 
 ```bash
 git clone git@github.com:stefano-blando/multi-agent-orchestration.git
@@ -30,25 +42,21 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configura `.env` con:
+Variabili minime in `.env`:
 - `TEAM_API_KEY`
 - `TEAM_ID`
 - `REGOLO`
 
-## Esecuzione
+## ▶️ Run
 
 ```bash
-python main.py
+python app/main.py
 ```
 
-## Test
+## 🧪 Test
 
 ```bash
 pytest -q tests/test_logic.py
-python smoke_test.py
+python scripts/smoke_test.py
+python scripts/test_agent.py speaking
 ```
-
-## Note
-
-- Il materiale pre-kickoff (demo Streamlit/Chainlit, pipeline retrieval sperimentale) e' stato rimosso dalla root.
-- La repo ora e' costruita sul codice operativo usato in `ventre-a-terra`.

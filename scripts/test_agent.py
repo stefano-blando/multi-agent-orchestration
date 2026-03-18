@@ -8,6 +8,10 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 
+# Allow imports from app/
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT_DIR, "app"))
+
 from agent import init_agent, create_agent_for_phase, build_prompt_for_phase
 from api_get import GameGET
 from api_mcp import GameMCP
@@ -107,7 +111,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    print("Usage: python test_agent.py [speaking|closed_bid|waiting|serving|all]")
+    print("Usage: python scripts/test_agent.py [speaking|closed_bid|waiting|serving|all]")
     print()
     try:
         asyncio.run(main())

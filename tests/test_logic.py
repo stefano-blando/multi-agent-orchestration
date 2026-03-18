@@ -4,8 +4,9 @@ import json
 import sys
 import os
 
-# Allow imports from baseline/
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Allow imports from app/
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT_DIR, "app"))
 
 from game_state import GameState
 from phases import serving
