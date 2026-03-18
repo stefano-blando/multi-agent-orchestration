@@ -1,15 +1,15 @@
-# 🍕 Multi-Agent Orchestration
+# Multi-Agent Orchestration
 
 Bot competitivo per **Hackapizza 2.0**, basato su orchestrazione multi-agente event-driven.
 
-## ✨ Cosa fa
+## Cosa fa
 
 - Gestisce il flusso di gioco via SSE (`game_started`, `phase_changed`, `client_spawned`, ...)
 - Esegue strategie diverse per ogni fase: `speaking`, `closed_bid`, `waiting`, `serving`
 - Usa tool MCP/HTTP per menu, bid, market, preparazione e servizio
 - Tiene stato runtime, metriche e persistenza locale per decisioni più robuste
 
-## 🗂️ Struttura Progetto
+## Struttura Progetto
 
 ```text
 app/
@@ -31,7 +31,7 @@ tests/
   test_logic.py          # unit test logica strategica
 ```
 
-## ⚙️ Setup
+## Setup
 
 ```bash
 git clone git@github.com:stefano-blando/multi-agent-orchestration.git
@@ -47,13 +47,13 @@ Variabili minime in `.env`:
 - `TEAM_ID`
 - `REGOLO`
 
-## ▶️ Run
+## Run
 
 ```bash
 python app/main.py
 ```
 
-## 🧪 Test
+## Test
 
 ```bash
 pytest -q tests/test_logic.py
