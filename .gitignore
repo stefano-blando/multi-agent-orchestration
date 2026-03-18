@@ -1,40 +1,21 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
+.env
 venv/
 .venv/
-*.egg-info/
-dist/
-build/
-
-# Env & secrets
-.env
-
-# Data (mai committare il dataset)
-data/raw/
-data/processed/
-data/traces/
-data/dev/benchmark_results.json
-
-# Vector store locale
-qdrant_data/
-chroma_db/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# OS
-.DS_Store
+__pycache__/
+*.py[cod]
 *.log
-
-# Contesto interno (solo locale)
-CLAUDE.md
-STATUS.md
-
-# IDE
+.pytest_cache/
+.DS_Store
 .vscode/
 .idea/
 
-# Chainlit runtime
-.chainlit/
+# Runtime state generated locally
+agent_memory_*.json
+state_snapshot.json
+price_history.json
+bid_archive.json
+agent.log
+
+# Local-only notes
+CLAUDE.md
+STATUS.md

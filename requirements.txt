@@ -1,28 +1,6 @@
-# Core framework (obbligatorio)
-datapizza-ai
-openai
-
-# Vector store
-qdrant-client
-
-# Document parsing
-docling
-beautifulsoup4
-pandas
-
-# Hybrid search
-rank-bm25
-
-# Embedding locale su GPU (gratis, RTX A1000 / Kaggle T4)
-sentence-transformers
-torch
-einops
-
-# Demo
-streamlit==1.54.0
-chainlit
-
-# Utils
-python-dotenv
-tqdm
-httpx
+aiohttp>=3.13.3
+datapizza-ai>=0.0.9
+datapizza-ai-clients-openai-like>=0.0.9
+python-dotenv>=1.2.1
+rich>=13.0.0
+pytest>=9.0.2

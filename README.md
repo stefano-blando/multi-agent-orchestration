@@ -1,125 +1,54 @@
-# Hackapizza 2.0 — Agent Edition
+# Multi-Agent Orchestration (Hackapizza 2.0)
 
-Soluzione per Hackapizza 2.0, competizione di Agentic AI organizzata da DataPizza.
+Repository rifattorizzata sul codice runtime avanzato sviluppato in `ventre-a-terra`.
+
+Il focus e' il bot competitivo event-driven per Hackapizza 2.0:
+- loop SSE di gioco
+- orchestrazione per fase (`speaking`, `closed_bid`, `waiting`, `serving`)
+- tools MCP/HTTP + strategy engine + persistence locale
+
+## Struttura
+
+- `main.py`: entrypoint SSE, dispatch fasi, retry, KPI e failover
+- `agent.py`: factory agent e sub-agent market analyst
+- `api_get.py`, `api_mcp.py`: client API
+- `game_state.py`: stato runtime del ristorante
+- `phases/`: prompt + logica per ogni fase
+- `utils/`: bidding/menu/serving/market/state persistence
+- `tools.py`: tool datapizza-ai usati dagli agenti
+- `tests/test_logic.py`: test unit logica strategica
+- `smoke_test.py`, `test_agent.py`: test operativi
 
 ## Setup rapido
 
 ```bash
-# 1. Clone & venv
 git clone git@github.com:stefano-blando/multi-agent-orchestration.git
 cd multi-agent-orchestration
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# 2. Config
 cp .env.example .env
-# → Inserisci le chiavi API nel .env
-
-# 3. Ingestion (prima run consigliata con recreate)
-python src/ingest.py --data_dir data/raw/ --recreate
-
-# 4. Test pipeline
-python src/agent.py
-
-# 5. Eval
-python src/eval.py --predictions predictions.json --ground_truth gt.json
-
-# 5b. Pre-check completo offline (senza API key)
-bash scripts/pre_hackathon_check.sh
-
-# 6. Demo
-streamlit run src/app.py
-
-# 6b. Demo chat-first (Chainlit)
-chainlit run src/app_chainlit.py
 ```
 
-## Architettura
+Configura `.env` con:
+- `TEAM_API_KEY`
+- `TEAM_ID`
+- `REGOLO`
 
-Sistema multi-agente basato su [datapizza-ai](https://github.com/datapizza-labs/datapizza-ai).
-L'agente pianifica autonomamente, usa tool in sequenza e si auto-corregge fino a produrre una risposta soddisfacente.
-
-```
-Query
-  └── OrchestratorAgent          # pianifica e coordina
-        ├── RetrieverAgent       # cerca nei documenti (BM25 + semantic)
-        ├── ValidatorAgent       # verifica vincoli (anche in batch)
-        └── SynthesizerAgent     # produce la risposta finale
-```
-
-Ogni agente opera in un loop ReAct (Reason → Act → Observe) e può richiamare
-gli altri agenti come tool. L'orchestratore decide autonomamente quante
-iterazioni eseguire prima di rispondere.
-
-Note retrieval:
-- Il corpus BM25 viene persistito in `data/index/bm25_corpus.jsonl` (configurabile con `BM25_CORPUS_PATH`).
-- `src/retrieval.py` usa quel file come fallback anche se ingestion e agent girano in processi separati.
-- `EMBEDDING_MODE=mock` abilita test offline senza API/GPU.
-- `RERANK_MODE` abilita reranking pluggable (`heuristic`, `cross_encoder`, `none`).
-
-## Quality Loop Offline
-
-Per migliorare prima del kickoff senza API key:
+## Esecuzione
 
 ```bash
-# Smoke end-to-end locale
-./venv/bin/python scripts/smoke_check.py
-
-# Benchmark validator/retrieval su casi dev
-./venv/bin/python scripts/offline_benchmark.py \
-  --cases data/dev/benchmark_cases.json \
-  --min_confidence 0.6
-
-# Stress test chunking/top_k
-./venv/bin/python scripts/stress_retrieval.py
-
-# Calibrazione soglia confidence
-./venv/bin/python scripts/calibrate_confidence.py \
-  --cases data/dev/benchmark_cases.json \
-  --corpus data/dev/bm25_corpus.jsonl
-
-# Hard-negative evaluation (controllo falsi positivi)
-./venv/bin/python scripts/hard_negative_eval.py \
-  --cases data/dev/hard_negative_cases.json \
-  --corpus data/dev/hard_negative_corpus.jsonl
+python main.py
 ```
 
-Policy fallback conservativa:
-- `src/agent.py::run()` restituisce `[]` se l'output agente non e' JSON valido con `answer` lista.
-- Questo evita output rumorosi in assenza di verifiche affidabili.
-- Con `ENABLE_STRUCTURED_FALLBACK=1`, se l'agente LLM non produce output valido, viene usata la pipeline schema-first offline.
-- Con `COMPETITION_MODE=1`, l'avvio fallisce esplicitamente se manca `OPENAI_API_KEY` (niente fallback silenzioso a mock).
-- Se non ci sono vincoli espliciti, la pipeline structured restituisce i candidati ranked (non forza un vincolo fittizio).
+## Test
 
-## Demo / PoC
+```bash
+pytest -q tests/test_logic.py
+python smoke_test.py
+```
 
-La demo Streamlit supporta due modalita':
-- `Structured PoC`: orchestrazione schema-first (funziona anche senza API key).
-- `Agent`: usa l'orchestratore LLM con trace runtime.
+## Note
 
-Output demo:
-- risposta finale
-- riepilogo validator batch (`safe_items`, vincoli passati/falliti)
-- payload JSON completo per debug rapido in hackathon
-
-Demo Chainlit:
-- UX chat-first per pitch agentico live
-- stessi backend/tool (`run_with_trace`, `run_structured_orchestration`, `check_constraints_batch`)
-- comandi rapidi: `/help`, `/mode`, `/constraints`, `/candidates`, `/topk`, `/evidence_limit`, `/timeout`, `/settings`
-- quick actions in chat (bottoni mode/demo/settings/help)
-- timeline step-by-step (`Step`) per orchestration, tool usage e validator summary
-
-Runtime tuning utili demo:
-- `APP_TIMEOUT_SECONDS`: timeout hard per chiamate runtime UI
-- `HYBRID_CACHE_TTL_SECONDS`: cache retrieval query ripetute
-- `BATCH_CACHE_TTL_SECONDS`: cache validator batch ripetuti
-
-## Codice Importato (Hackapizza + Ventre a Terra)
-
-Per mantenere la repo ordinata ma completa, il codice storico e' stato importato in:
-
-- `legacy/ventre-a-terra-baseline/`: runtime SSE/phase-engine completo (core competitivo).
-- `legacy/hackapizza-unique/`: file unici provenienti da `hackapizza` (`prompts.py`, strategia, status).
-
-Sono stati esclusi artefatti non utili al codice (venv, cache, log, file slide, dump runtime).
+- Il materiale pre-kickoff (demo Streamlit/Chainlit, pipeline retrieval sperimentale) e' stato rimosso dalla root.
+- La repo ora e' costruita sul codice operativo usato in `ventre-a-terra`.
