@@ -1,0 +1,20 @@
+[
+  {
+    "id": "hn_gluten_contradiction",
+    "candidates": ["Pizza Nebulosa"],
+    "constraints": ["senza glutine"],
+    "expected_safe": []
+  },
+  {
+    "id": "hn_vegan_optional_only",
+    "candidates": ["Risotto Lunare"],
+    "constraints": ["vegano"],
+    "expected_safe": []
+  },
+  {
+    "id": "hn_positive_control",
+    "candidates": ["Insalata Orbitale"],
+    "constraints": ["vegano", "senza glutine"],
+    "expected_safe": ["Insalata Orbitale"]
+  }
+]

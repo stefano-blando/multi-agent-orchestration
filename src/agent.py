@@ -547,11 +547,18 @@ def _summarize_batch_results(results: list[dict], min_confidence: float = 0.6) -
 
 
 def build_client():
-    if os.getenv("OPENAI_API_KEY"):
+    api_key = os.getenv("OPENAI_API_KEY")
+    competition = os.getenv("COMPETITION_MODE", "0").strip() not in {"0", "false", "False"}
+    if api_key:
         from datapizza.clients.openai import OpenAIClient
         return OpenAIClient(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-mini",
+            api_key=api_key,
+            model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        )
+    if competition:
+        raise RuntimeError(
+            "COMPETITION_MODE attivo ma OPENAI_API_KEY mancante! "
+            "Imposta la key nel .env prima di lanciare in modalità gara."
         )
     from datapizza.clients.mock_client import MockClient
     return MockClient()
@@ -831,26 +838,40 @@ def run_structured_orchestration(request: dict | StructuredOrchestrationRequest)
         candidates = suggest_candidates(req.query, top_k_docs=10, max_candidates=25)
 
     if not constraints:
-        # fallback ultra-conservativo: senza vincoli espliciti non validiamo candidati.
-        constraints = ["vincolo non specificato"]
-
-    batch_json = check_constraints_batch(
-        items=candidates,
-        constraints=constraints,
-        min_confidence=req.min_confidence,
-    )
-    try:
-        batch = ConstraintBatchResponse.model_validate_json(batch_json)
-    except ValidationError:
+        # Nessun vincolo esplicito: restituiamo i candidati ranked direttamente.
+        # Non ha senso validare contro vincoli inesistenti (uccide il recall).
         batch = ConstraintBatchResponse(
             results=[],
             summary=ConstraintBatchSummary(
                 min_confidence=req.min_confidence,
-                safe_items=[],
-                item_summary=[],
+                safe_items=candidates,
+                item_summary=[
+                    ItemValidationSummary(
+                        item=c, is_safe=True, failed_constraints=[], passed_constraints=[]
+                    ).model_dump()
+                    for c in candidates
+                ],
                 total_checks=0,
             ),
         )
+    else:
+        batch_json = check_constraints_batch(
+            items=candidates,
+            constraints=constraints,
+            min_confidence=req.min_confidence,
+        )
+        try:
+            batch = ConstraintBatchResponse.model_validate_json(batch_json)
+        except ValidationError:
+            batch = ConstraintBatchResponse(
+                results=[],
+                summary=ConstraintBatchSummary(
+                    min_confidence=req.min_confidence,
+                    safe_items=[],
+                    item_summary=[],
+                    total_checks=0,
+                ),
+            )
 
     result = StructuredOrchestrationResult(
         request_id=str(uuid.uuid4()),

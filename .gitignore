@@ -14,6 +14,8 @@ build/
 # Data (mai committare il dataset)
 data/raw/
 data/processed/
+data/traces/
+data/dev/benchmark_results.json
 
 # Vector store locale
 qdrant_data/

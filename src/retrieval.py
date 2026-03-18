@@ -433,21 +433,53 @@ def hybrid_search(query: str, top_k: int = 5) -> list[dict]:
     return _store_cache(final_rows)
 
 
+_CANDIDATE_PATTERNS: list[re.Pattern] = [
+    # "Nome:" o "Nome -" (intestazioni)
+    re.compile(r"([A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9'' ]{2,50})\s*[:–—-]\s"),
+    # Bullet list: "- Nome", "• Nome", "* Nome"
+    re.compile(r"(?:^|\n)\s*[-•*]\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9'' ]{2,50})"),
+    # Numerati: "1. Nome", "1) Nome"
+    re.compile(r"(?:^|\n)\s*\d+[.)]\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9'' ]{2,50})"),
+    # Nomi capitalizzati standalone (2-6 parole, parole con maiuscola o preposizioni brevi)
+    re.compile(r"(?:^|\n|[.;,]\s)([A-Z][a-zÀ-ÖØ-öø-ÿ]+(?:\s+(?:[A-Z][a-zÀ-ÖØ-öø-ÿ]*|[a-zÀ-ÖØ-öø-ÿ]{1,4})){1,5})(?=\s+[a-zÀ-ÖØ-öø-ÿè]|\s*[,.\n;:(]|$)"),
+]
+
+_NOISE_WORDS = frozenset({
+    "il", "lo", "la", "le", "gli", "un", "uno", "una", "del", "dello",
+    "della", "dei", "degli", "delle", "the", "and", "with", "from",
+    "nota", "note", "tabella", "table", "figura", "figure", "sezione",
+    "section", "capitolo", "chapter", "pagina", "page", "documento",
+})
+
+
 def suggest_candidates(query: str, top_k_docs: int = 8, max_candidates: int = 20) -> list[str]:
     """
     Suggerisce item candidati da validare estraendo nomi dai risultati retrieval.
+    Usa pattern multipli: intestazioni, bullet, numerati, nomi capitalizzati.
     """
     rows = hybrid_search(query, top_k=top_k_docs)
     candidates: list[str] = []
     seen: set[str] = set()
-    pattern = re.compile(r"([A-Z][A-Za-z0-9' ]{2,50})\s*:")
+
+    def _add(name: str) -> bool:
+        name = name.strip().rstrip(".:;,")
+        normalized = name.lower()
+        if not name or len(name) < 3 or len(name.split()) > 8:
+            return False
+        if normalized in seen:
+            return False
+        # Scarta se è solo una stop word / noise
+        if normalized in _NOISE_WORDS:
+            return False
+        seen.add(normalized)
+        candidates.append(name)
+        return len(candidates) >= max_candidates
+
     for row in rows:
         text = row.get("text", "")
-        for match in pattern.findall(text):
-            candidate = match.strip()
-            if len(candidate.split()) <= 8 and candidate not in seen:
-                seen.add(candidate)
-                candidates.append(candidate)
-                if len(candidates) >= max_candidates:
+        for pattern in _CANDIDATE_PATTERNS:
+            for match in pattern.findall(text):
+                if _add(match):
                     return candidates
+
     return candidates
