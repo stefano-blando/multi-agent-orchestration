@@ -6,8 +6,8 @@ Soluzione per Hackapizza 2.0, competizione di Agentic AI organizzata da DataPizz
 
 ```bash
 # 1. Clone & venv
-git clone https://github.com/StefanoBlando/hackapizza-2026.git
-cd hackapizza-2026
+git clone git@github.com:stefano-blando/multi-agent-orchestration.git
+cd multi-agent-orchestration
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -89,6 +89,8 @@ Policy fallback conservativa:
 - `src/agent.py::run()` restituisce `[]` se l'output agente non e' JSON valido con `answer` lista.
 - Questo evita output rumorosi in assenza di verifiche affidabili.
 - Con `ENABLE_STRUCTURED_FALLBACK=1`, se l'agente LLM non produce output valido, viene usata la pipeline schema-first offline.
+- Con `COMPETITION_MODE=1`, l'avvio fallisce esplicitamente se manca `OPENAI_API_KEY` (niente fallback silenzioso a mock).
+- Se non ci sono vincoli espliciti, la pipeline structured restituisce i candidati ranked (non forza un vincolo fittizio).
 
 ## Demo / PoC
 
