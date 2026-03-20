@@ -1,34 +1,34 @@
 # Multi-Agent Orchestration
 
-Bot competitivo per **Hackapizza 2.0**, basato su orchestrazione multi-agente event-driven.
+Competitive bot for **Hackapizza 2.0**, built around event-driven multi-agent orchestration.
 
-## Cosa fa
+## What It Does
 
-- Gestisce il flusso di gioco via SSE (`game_started`, `phase_changed`, `client_spawned`, ...)
-- Esegue strategie diverse per ogni fase: `speaking`, `closed_bid`, `waiting`, `serving`
-- Usa tool MCP/HTTP per menu, bid, market, preparazione e servizio
-- Tiene stato runtime, metriche e persistenza locale per decisioni più robuste
+- Handles game flow through SSE events (`game_started`, `phase_changed`, `client_spawned`, ...)
+- Executes different strategies for each phase: `speaking`, `closed_bid`, `waiting`, `serving`
+- Uses MCP/HTTP tools for menu, bidding, market, preparation, and serving actions
+- Maintains runtime state, metrics, and local persistence for more robust decision-making
 
-## Struttura Progetto
+## Project Structure
 
 ```text
 app/
-  main.py                # entrypoint runtime
-  agent.py               # factory agent e sub-agent
-  api_get.py             # client REST
-  api_mcp.py             # client MCP
-  game_state.py          # stato runtime ristorante
-  tools.py               # tool chiamabili dagli agenti
-  phases/                # logica e prompt per fase
-  utils/                 # strategia, pricing, serving, persistence
-  replay_metrics.py      # analisi replay
+  main.py                # runtime entrypoint
+  agent.py               # agent and sub-agent factory
+  api_get.py             # REST client
+  api_mcp.py             # MCP client
+  game_state.py          # restaurant runtime state
+  tools.py               # callable tools exposed to agents
+  phases/                # phase logic and prompts
+  utils/                 # strategy, pricing, serving, persistence
+  replay_metrics.py      # replay analysis
 
 scripts/
-  smoke_test.py          # check rapido API/SSE/MCP
-  test_agent.py          # simulazione fasi senza loop SSE completo
+  smoke_test.py          # quick API/SSE/MCP check
+  test_agent.py          # phase simulation without full SSE loop
 
 tests/
-  test_logic.py          # unit test logica strategica
+  test_logic.py          # unit tests for strategic logic
 ```
 
 ## Setup
@@ -42,7 +42,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Variabili minime in `.env`:
+Minimum variables in `.env`:
 - `TEAM_API_KEY`
 - `TEAM_ID`
 - `REGOLO`
